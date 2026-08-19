@@ -49,9 +49,9 @@ if uploaded_file is not None:
           try:
             client = genai.Client(api_key=api_key)
 
-            # Generate content using the stable flash model and correct SDK method
+            # Updated to the current production model ID
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.7-flash",
                 contents=f"""
                     You are an expert institutional procurement auditor focused on environmental sustainability, data analytics, and trusted governance.
                     Analyze the following structured procurement data from our EcoProcure template:
