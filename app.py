@@ -1,31 +1,64 @@
-import streamlit as st
 from google import genai
+import pandas as pd
+import streamlit as st
 
 st.title("🌱 EcoProcure AI: Smart Procurement Auditor")
-st.write("Evaluate supplier bids for workshop tools using Total Cost of Ownership (TCO) and sustainability metrics.")
-
-# Input fields for user data
-item_name = st.text_input("Item Name", "Heavy-Duty Bench Grinder")
-bid_data = st.text_area(
-    "Paste Supplier Quotes & Specs",
-    "1. Alpha Industrial Tools: Cost = $450, Power = 1.2 kW, Lifespan = 8 yrs, Maint = $25/yr\n"
-    "2. Beta Machinery Supply: Cost = $380, Power = 1.8 kW, Lifespan = 5 yrs, Maint = $40/yr"
+st.write(
+    "Upload your completed EcoProcure Excel template to audit supplier bids"
+    " and calculate Total Cost of Ownership (TCO)."
 )
 
-if st.button("Run AI Sustainability Audit"):
-  with st.spinner("Analyzing TCO and Environmental Impact..."):
-    # Initialize Gemini Client (picks up cloud environment secrets safely)
-    client = genai.Client()
+# File uploader for the exact Excel template
+uploaded_file = st.file_uploader(
+    "Upload EcoProcure Excel Template (.xlsx or .csv)", type=["csv", "xlsx"]
+)
 
-    response = client.interactions.create(
-        model="gemini-3.7-flash",
-        input=f"""
-        You are an expert institutional procurement auditor focused on environmental sustainability.
-        Evaluate these supplier options for '{item_name}':
-        {bid_data}
-        Calculate 5-year TCO (assuming $0.28/kWh and 300 usage hours/year), score sustainability, and give a clear recommendation.
-        """,
+if uploaded_file is not None:
+  try:
+    # Read the file depending on its extension
+    if uploaded_file.name.endswith(".csv"):
+      df = pd.read_csv(uploaded_file)
+    else:
+      df = pd.read_excel(uploaded_file)
+
+    st.write("### 📊 Preview of Uploaded Data Template:")
+    st.dataframe(df)
+
+    # Convert the structured table into clean text for Gemini to analyze
+    template_data_string = df.to_string(index=False)
+
+    if st.button("Run AI TCO & Sustainability Audit"):
+      with st.spinner(
+          "Analyzing TCO, energy consumption, and lifecycle impact..."
+      ):
+        api_key = st.secrets.get("GEMINI_API_KEY", None)
+        client = genai.Client(api_key=api_key) if api_key else genai.Client()
+
+        response = client.interactions.create(
+            model="gemini-3.7-flash",
+            input=f"""
+                You are an expert institutional procurement auditor focused on environmental sustainability and trusted governance.
+                Analyze the following structured procurement data from our EcoProcure template:
+                
+                {template_data_string}
+                
+                Your tasks:
+                1. Review the Initial Bids, Rated Power, Lifespan, and Maintenance costs provided in the table.
+                2. Verify the 5-year Total Cost of Ownership (TCO) calculations.
+                3. Evaluate the sustainability and e-waste impact based on equipment durability and power draw.
+                4. Provide a clear, structured recommendation on which supplier should be approved or rejected based on long-term institutional value.
+                """,
+        )
+
+        st.subheader("💡 AI Procurement Audit & Recommendations")
+        st.markdown(response.output_text)
+
+  except Exception as e:
+    st.error(
+        f"Error processing the file: {e}. Please ensure you are uploading the"
+        " correct EcoProcure template structure."
     )
-
-    st.subheader("Audit Results & Recommendation")
-    st.markdown(response.output_text)
+else:
+  st.info(
+      "👆 Please upload your Excel template file above to begin the audit."
+  )
