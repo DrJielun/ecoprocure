@@ -1,94 +1,172 @@
+import os
 import time
-from google import genai
 import pandas as pd
 import streamlit as st
+from google import genai
+from google.genai import errors
 
-# Page Configuration
+# --- Page Configuration ---
 st.set_page_config(
-    page_title="EcoProcure AI: Smart Procurement Auditor", page_icon="🌱", layout="wide"
+    page_title="EcoProcure: Smart Procurement Auditor",
+    page_icon="🌱",
+    layout="wide",
 )
 
+# --- Custom Styling (Green Minimalist Theme) ---
+st.markdown(
+    """
+    <style>
+    :root {
+        --primary: #0F5132;
+        --primary-light: #D1E7DD;
+        --accent: #198754;
+    }
+    .main {
+        background-color: #F8F9FA;
+    }
+    h1, h2, h3 {
+        color: #0F5132 !important;
+    }
+    .stButton>button {
+        background-color: #198754;
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+    }
+    .stButton>button:hover {
+        background-color: #0F5132;
+        color: white;
+    }
+    </style>
+""",
+    unsafe_allow_html=True,
+)
+
+# --- Header Section ---
 st.title("🌱 EcoProcure AI: Smart Procurement Auditor")
-st.write(
+st.markdown(
     "Upload your completed EcoProcure Excel template to generate TCO scores,"
     " sustainability ratings, and vendor recommendations."
 )
 
+# --- Template Download Section ---
+template_path = "template.xlsx"  # Ensure this file exists in your GitHub repo
+
+if os.path.exists(template_path):
+  with open(template_path, "rb") as file:
+    template_bytes = file.read()
+
+  col1, col2 = st.columns([3, 1])
+  with col1:
+    st.info(
+        "Need the official evaluation layout? Download the template file below"
+        " to populate your ITQ data."
+    )
+  with col2:
+    st.download_button(
+        label="📥 Download Template",
+        data=template_bytes,
+        file_name="EcoProcure_Template.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+else:
+  st.warning(
+      "⚠️ Note: `template.xlsx` not found in root directory. File upload is"
+      " still fully functional."
+  )
+
+st.markdown("---")
+
+# --- API Key Resolution ---
+api_key = None
+if "GEMINI_API_KEY" in st.secrets:
+  api_key = st.secrets["GEMINI_API_KEY"]
+else:
+  api_key = os.environ.get("GEMINI_API_KEY")
+
+# --- File Uploader ---
 uploaded_file = st.file_uploader(
-    "Upload EcoProcure Excel Template (.xlsx or .csv)", type=["csv", "xlsx"]
+    "Upload EcoProcure Excel Template (.xlsx or .csv)", type=["xlsx", "csv"]
 )
 
 if uploaded_file is not None:
   try:
+    # Read file based on extension
     if uploaded_file.name.endswith(".csv"):
       df = pd.read_csv(uploaded_file)
     else:
       df = pd.read_excel(uploaded_file)
 
-    st.write("### 📊 Preview of Uploaded Data Template:")
-    st.dataframe(df)
+    st.subheader("📊 Preview of Uploaded Data Template:")
+    st.dataframe(df, use_container_width=True)
 
-    template_data_string = df.to_string(index=False)
+    # Convert dataframe to string payload for the model
+    data_text = df.to_string(index=True)
 
     if st.button("Run AI TCO & Sustainability Audit"):
-      api_key = st.secrets.get("GEMINI_API_KEY", None)
-
       if not api_key:
         st.error(
-            "⚠️ GEMINI_API_KEY is missing! Please configure it in your Streamlit"
-            " Cloud 'Settings > Secrets'."
+            "❌ Missing Gemini API Key. Please configure `GEMINI_API_KEY` in"
+            " Streamlit Cloud Secrets."
         )
       else:
         with st.spinner(
-            "Calculating TCO scores, evaluating sustainability, and generating"
-            " recommendations..."
+            "Running multi-criteria TCO calculation and sustainability audit..."
         ):
-          client = genai.Client(api_key=api_key)
+          try:
+            # Initialize client using modern google-genai SDK
+            client = genai.Client(api_key=api_key)
 
-          prompt_text = f"""
-                You are an expert institutional procurement auditor focused on environmental sustainability, data analytics, and trusted governance.
-                Analyze the following structured procurement data from our EcoProcure template:
-                
-                {template_data_string}
-                
-                You MUST structure your output into three distinct sections for every item evaluated:
-                1. **TCO Score / Analysis:** Review or calculate the 5-year Total Cost of Ownership (Initial Bid + [Rated Power * Lifespan * Usage Hours * Electricity Cost] + [Maintenance Cost * Lifespan]).
-                2. **Sustainability Score:** Provide a clear score out of 100 based on energy efficiency (rated power draw) and expected lifespan (durability against e-waste).
-                3. **Strategic Recommendations:** Give a definitive verdict (Approved / Rejected / Alternative) with a justified rationale on which supplier provides the best long-term institutional value.
-                """
-
-          # Retry mechanism for temporary 503 high demand errors
-          max_retries = 3
-          success = False
-          response = None
-
-          for attempt in range(max_retries):
-            try:
-              response = client.models.generate_content(
-                  model="gemini-3.7-flash", contents=prompt_text
-              )
-              success = True
-              break
-            except Exception as e:
-              if "503" in str(e) and attempt < max_retries - 1:
-                time.sleep(2)  # Wait 2 seconds before retrying
-                continue
-              else:
-                raise e
-
-          if success and response:
-            st.subheader(
-                "💡 AI Audit Report: TCO, Sustainability Scores & Recommendations"
+            system_instruction = (
+                "You are an expert institutional procurement auditor focused on"
+                " environmental sustainability, data analytics, and trusted"
+                " governance. For every dataset provided, you must structure"
+                " your output into three distinct sections: 1. TCO Score /"
+                " Analysis (Review or calculate the 5-year Total Cost of"
+                " Ownership based on Initial Bid + [Rated Power * Lifespan *"
+                " Usage Hours * Electricity Cost] + [Maintenance Cost *"
+                " Lifespan]), 2. Sustainability Score (out of 100 based on"
+                " energy efficiency and expected lifespan against e-waste), and"
+                " 3. Strategic Recommendations with a definitive verdict"
+                " (Approved / Rejected / Alternative) and justified rationale."
             )
+
+            prompt = (
+                "Analyze the following structured procurement data from our"
+                f" EcoProcure template:\n\n{data_text}"
+            )
+
+            # Call gemini-3.7-flash with system instructions
+            response = client.models.generate_content(
+                model="gemini-3.7-flash",
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.2,
+                ),
+            )
+
+            st.success("Audit analysis completed successfully!")
+            st.markdown("### 📋 AI Procurement Audit Report")
             st.markdown(response.text)
+
+          except Exception as api_err:
+            error_str = str(api_err)
+            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+              st.error(
+                  "⚠️ API Quota limit reached for the free tier. Please"
+                  " generate a new API key in Google AI Studio or use Google"
+                  " AI Studio directly to bypass limits during your presentation."
+              )
+            else:
+              st.error(f"An error occurred during AI generation: {api_err}")
 
   except Exception as e:
     st.error(
-        f"An error occurred during AI generation: {e}. Please try clicking the"
-        " button again."
+        f"Error reading the uploaded file. Ensure it is a valid Excel or CSV"
+        f" format. Details: {e}"
     )
 else:
-  st.info(
-      "👆 Please upload your Excel template file above to generate the audit"
-      " report."
-  )
+  st.info("👆 Please upload your Excel template file above to generate the audit report.")
